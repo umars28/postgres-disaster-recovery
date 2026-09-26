@@ -114,3 +114,25 @@ Dengan `archive-push` sinkron, archiver hanya sanggup sekitar 1 segment/detik (�
 Selama itu `last_archived_time` tetap segar karena archiver terus bekerja. Jadi "umur archive terakhir" tidak bisa dipakai sebagai metrik RPO. Metrik `pg_stat_archiver_rpo_estimate_seconds` mengambil nilai terbesar antara umur archive terakhir dan umur file `.ready` tertua.
 
 Dengan `archive-async=y` + `process-max=4` untuk `archive-push`, pada load yang sama antrean maksimal 3 segment dengan umur tertua ≤1s. Harganya tps turun sekitar 16% (3.482 vs 4.158), karena kompresi paralel bersaing CPU di host yang sama.
+
+## Fase 5 — chaos dan runbook
+
+Prosedur pemulihan ada di [RUNBOOK.md](RUNBOOK.md). Setiap skenario di bawah menjalankan insiden, memulihkannya, lalu memverifikasi hasilnya dengan assertion. Hasil ditambahkan ke `runs/chaos.csv`.
+
+| Script | Insiden | Hasil terukur |
+|---|---|---|
+| `scripts/chaos/pgdata-deleted.sh` | `rm -rf $PGDATA/*` saat workload jalan | deteksi 1.1s, RTO 17.8s dari repo1, RPO 31.2s |
+| `scripts/chaos/archive-broken.sh` | `pgbackrest stop` lalu lupa `start` | deteksi 1.5s, RPO naik ke 178s selama outage, 0 commit hilang |
+| `scripts/chaos/pitr-drop-table.sh` | `DROP TABLE` 20 juta baris | restore ke xid 18.5s, ke restore point 18.9s, salin balik 103.9s |
+| `scripts/chaos/old-timeline.sh` | PITR prod salah target, butuh data timeline lama | `--target-timeline` mengembalikan data dalam 32–35s |
+
+```sh
+bash scripts/chaos/pgdata-deleted.sh
+```
+
+### Temuan
+
+- `pg_isready` tetap OK setelah PGDATA dihapus, padahal semua koneksi baru `FATAL`. Healthcheck diganti ke `SELECT 1`.
+- Sesi yang sudah terbuka tetap meng-ack commit selama 22 detik setelah PGDATA dihapus, sampai Postgres butuh segment WAL baru dan PANIC. Semua commit itu hilang, jadi server harus di-kill begitu insiden terdeteksi.
+- Setelah `archive_command` pulih, antrean baru mulai turun sampai sekitar 60 detik kemudian. Waktu drain 51s untuk 19 segment.
+- Restore ke xid dan restore point hanya butuh sekitar 19 detik. Yang mahal adalah menyalin tabel kembali ke prod.
