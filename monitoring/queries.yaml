@@ -1,0 +1,32 @@
+pg_stat_archiver:
+  query: |
+    SELECT archived_count,
+           failed_count,
+           coalesce(extract(epoch FROM now() - last_archived_time), -1) AS last_archive_age_seconds,
+           (last_failed_time IS NOT NULL AND (last_archived_time IS NULL OR last_failed_time > last_archived_time))::int AS failing,
+           r.ready_files,
+           greatest(coalesce(extract(epoch FROM now() - last_archived_time), 0), r.oldest_ready_age_seconds) AS rpo_estimate_seconds
+    FROM pg_stat_archiver,
+         LATERAL (SELECT count(*) AS ready_files,
+                         coalesce(extract(epoch FROM now() - min(modification)), 0) AS oldest_ready_age_seconds
+                  FROM pg_ls_archive_statusdir()
+                  WHERE name LIKE '%.ready') r
+  metrics:
+    - archived_count:
+        usage: "COUNTER"
+        description: "WAL files berhasil diarsip"
+    - failed_count:
+        usage: "COUNTER"
+        description: "Percobaan archive_command yang gagal"
+    - last_archive_age_seconds:
+        usage: "GAUGE"
+        description: "Detik sejak WAL terakhir berhasil diarsip"
+    - failing:
+        usage: "GAUGE"
+        description: "1 jika kegagalan terakhir lebih baru dari keberhasilan terakhir"
+    - ready_files:
+        usage: "GAUGE"
+        description: "Segment WAL yang menunggu diarsip"
+    - rpo_estimate_seconds:
+        usage: "GAUGE"
+        description: "Perkiraan data yang hilang jika server mati sekarang"

@@ -1,0 +1,45 @@
+groups:
+  - name: wal-archive
+    rules:
+      - alert: PgArchiveFailing
+        expr: pg_stat_archiver_failing == 1
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "archive_command gagal, WAL menumpuk di pg_wal dan RPO terus membesar"
+      - alert: PgRpoBudgetExceeded
+        expr: pg_stat_archiver_rpo_estimate_seconds > 120
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Perkiraan RPO {{ $value }}s melewati target 120s"
+      - alert: PgExporterDown
+        expr: up{job="postgres"} == 0 or pg_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Metrik archiving tidak terbaca, status backup buta"
+
+  - name: restore-test
+    rules:
+      - alert: RestoreTestFailed
+        expr: restore_test_success == 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Restore test terakhir gagal, backup belum tentu bisa dipakai"
+      - alert: RestoreTestStale
+        expr: time() - restore_test_last_success_timestamp_seconds > 86400
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tidak ada restore test sukses dalam 24 jam"
+      - alert: RtoBudgetExceeded
+        expr: restore_test_rto_seconds > 300
+        labels:
+          severity: warning
+        annotations:
+          summary: "RTO restore test {{ $value }}s melewati target 300s"

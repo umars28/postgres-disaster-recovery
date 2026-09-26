@@ -1,15 +1,25 @@
+x-pg-env: &pg-env
+  POSTGRES_PASSWORD: postgres
+  PGBACKREST_REPO2_S3_KEY: minioadmin
+  PGBACKREST_REPO2_S3_KEY_SECRET: minioadmin-secret
+  PGBACKREST_REPO2_CIPHER_PASS: ${PGBR_CIPHER_PASS:?isi di .env}
+  PGBACKREST_REPO3_S3_KEY: minioadmin
+  PGBACKREST_REPO3_S3_KEY_SECRET: minioadmin-secret
+  PGBACKREST_REPO3_CIPHER_PASS: ${PGBR_CIPHER_PASS_REPO3:?isi di .env}
+
+x-pg-healthcheck: &pg-healthcheck
+  test: ["CMD", "pg_isready", "-U", "postgres"]
+  interval: 2s
+  timeout: 3s
+  retries: 5
+  start_period: 600s
+  start_interval: 1s
+
 services:
   pg:
     build: .
     depends_on: [minio]
-    environment:
-      POSTGRES_PASSWORD: postgres
-      PGBACKREST_REPO2_S3_KEY: minioadmin
-      PGBACKREST_REPO2_S3_KEY_SECRET: minioadmin-secret
-      PGBACKREST_REPO2_CIPHER_PASS: ${PGBR_CIPHER_PASS:?isi di .env}
-      PGBACKREST_REPO3_S3_KEY: minioadmin
-      PGBACKREST_REPO3_S3_KEY_SECRET: minioadmin-secret
-      PGBACKREST_REPO3_CIPHER_PASS: ${PGBR_CIPHER_PASS_REPO3:?isi di .env}
+    environment: *pg-env
     command:
       - postgres
       - -c
@@ -20,18 +30,54 @@ services:
       - archive_command=pgbackrest --stanza=main archive-push %p
       - -c
       - archive_timeout=${ARCHIVE_TIMEOUT:-60}
-    healthcheck:
-      test: ["CMD", "pg_isready", "-U", "postgres"]
-      interval: 2s
-      timeout: 3s
-      retries: 5
-      start_period: 600s
-      start_interval: 1s
+    healthcheck: *pg-healthcheck
     volumes:
       - pgdata:/var/lib/postgresql/data
       - pgbackrest:/var/lib/pgbackrest
       - pglog:/var/log/pgbackrest
       - ./certs/ca/ca.crt:/etc/pgbackrest/ca.crt:ro
+
+  scratch:
+    build: .
+    profiles: ["restore-test"]
+    depends_on: [minio]
+    environment: *pg-env
+    command: ["postgres", "-c", "archive_mode=off"]
+    healthcheck: *pg-healthcheck
+    volumes:
+      - scratchdata:/var/lib/postgresql/data
+      - ./certs/ca/ca.crt:/etc/pgbackrest/ca.crt:ro
+
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.17.1
+    command: ["--extend.query-path=/queries.yaml"]
+    environment:
+      DATA_SOURCE_NAME: postgresql://postgres:postgres@pg:5432/postgres?sslmode=disable
+    volumes:
+      - ./monitoring/queries.yaml:/queries.yaml:ro
+
+  pushgateway:
+    image: prom/pushgateway:v1.11.1
+    ports: ["127.0.0.1:19091:9091"]
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    ports: ["127.0.0.1:9090:9090"]
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    ports: ["127.0.0.1:3000:3000"]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/dr.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
 
   minio:
     image: pgsty/minio:RELEASE.2026-06-18T00-00-00Z
@@ -77,3 +123,5 @@ volumes:
   pgbackrest:
   pglog:
   minio-data:
+  scratchdata:
+  prometheus-data:

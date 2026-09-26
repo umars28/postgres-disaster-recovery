@@ -1,0 +1,66 @@
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 10s
+
+tests:
+  - interval: 10s
+    input_series:
+      - series: pg_stat_archiver_failing{job="postgres"}
+        values: 0 0 1 1 1 1 1 1
+      - series: pg_stat_archiver_rpo_estimate_seconds{job="postgres"}
+        values: 30 60 90 120 150 180 210 240 270 300 330 360 390 420
+    alert_rule_test:
+      - eval_time: 20s
+        alertname: PgArchiveFailing
+        exp_alerts: []
+      - eval_time: 60s
+        alertname: PgArchiveFailing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: postgres
+            exp_annotations:
+              summary: "archive_command gagal, WAL menumpuk di pg_wal dan RPO terus membesar"
+      - eval_time: 60s
+        alertname: PgRpoBudgetExceeded
+        exp_alerts: []
+      - eval_time: 100s
+        alertname: PgRpoBudgetExceeded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: postgres
+            exp_annotations:
+              summary: "Perkiraan RPO 330s melewati target 120s"
+
+  - interval: 1m
+    input_series:
+      - series: restore_test_success{job="restore_test",repo="repo2"}
+        values: 1 1 0
+      - series: restore_test_rto_seconds{job="restore_test",repo="repo2"}
+        values: 12 98 420
+      - series: restore_test_last_success_timestamp_seconds{job="restore_test",repo="repo2"}
+        values: 0x3
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: RestoreTestFailed
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: RestoreTestFailed
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: restore_test
+              repo: repo2
+            exp_annotations:
+              summary: "Restore test terakhir gagal, backup belum tentu bisa dipakai"
+      - eval_time: 2m
+        alertname: RtoBudgetExceeded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: restore_test
+              repo: repo2
+            exp_annotations:
+              summary: "RTO restore test 420s melewati target 300s"
