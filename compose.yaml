@@ -7,6 +7,9 @@ services:
       PGBACKREST_REPO2_S3_KEY: minioadmin
       PGBACKREST_REPO2_S3_KEY_SECRET: minioadmin-secret
       PGBACKREST_REPO2_CIPHER_PASS: ${PGBR_CIPHER_PASS:?isi di .env}
+      PGBACKREST_REPO3_S3_KEY: minioadmin
+      PGBACKREST_REPO3_S3_KEY_SECRET: minioadmin-secret
+      PGBACKREST_REPO3_CIPHER_PASS: ${PGBR_CIPHER_PASS_REPO3:?isi di .env}
     command:
       - postgres
       - -c
