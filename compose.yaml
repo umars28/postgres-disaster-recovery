@@ -1,8 +1,12 @@
 services:
   pg:
     build: .
+    depends_on: [minio]
     environment:
       POSTGRES_PASSWORD: postgres
+      PGBACKREST_REPO2_S3_KEY: minioadmin
+      PGBACKREST_REPO2_S3_KEY_SECRET: minioadmin-secret
+      PGBACKREST_REPO2_CIPHER_PASS: ${PGBR_CIPHER_PASS:?isi di .env}
     command:
       - postgres
       - -c
@@ -15,7 +19,51 @@ services:
       - archive_timeout=60
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - pgbackrest:/var/lib/pgbackrest   # sengaja volume terpisah = "offsite" versi lab
+      - pgbackrest:/var/lib/pgbackrest
+      - pglog:/var/log/pgbackrest
+      - ./certs/ca/ca.crt:/etc/pgbackrest/ca.crt:ro
+
+  minio:
+    image: pgsty/minio:RELEASE.2026-06-18T00-00-00Z
+    command: server /data --console-address ":9001" --certs-dir /certs
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin-secret
+    volumes:
+      - minio-data:/data
+      - ./certs/minio:/certs:ro
+
+  aws:
+    image: amazon/aws-cli
+    profiles: ["tools"]
+    environment:
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin-secret
+      AWS_DEFAULT_REGION: us-east-1
+    volumes:
+      - ./certs/ca/ca.crt:/ca.crt:ro
+    entrypoint: ["aws", "--endpoint-url", "https://minio:9000", "--ca-bundle", "/ca.crt"]
+
+  workload:
+    image: postgres:16
+    depends_on: [pg]
+    profiles: ["workload"]
+    restart: "no"
+    environment:
+      PGHOST: pg
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGAPPNAME: workload
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        psql <<'EOF'
+        INSERT INTO events(payload) VALUES (md5(random()::text))
+        \watch 0.2
+        EOF
+
 volumes:
   pgdata:
   pgbackrest:
+  pglog:
+  minio-data:
