@@ -19,7 +19,14 @@ services:
       - -c
       - archive_command=pgbackrest --stanza=main archive-push %p
       - -c
-      - archive_timeout=60
+      - archive_timeout=${ARCHIVE_TIMEOUT:-60}
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
+      start_period: 600s
+      start_interval: 1s
     volumes:
       - pgdata:/var/lib/postgresql/data
       - pgbackrest:/var/lib/pgbackrest
@@ -49,7 +56,9 @@ services:
 
   workload:
     image: postgres:16
-    depends_on: [pg]
+    depends_on:
+      pg:
+        condition: service_healthy
     profiles: ["workload"]
     restart: "no"
     environment:
@@ -57,13 +66,11 @@ services:
       PGUSER: postgres
       PGPASSWORD: postgres
       PGAPPNAME: workload
-    entrypoint: ["bash", "-c"]
-    command:
-      - |
-        psql <<'EOF'
-        INSERT INTO events(payload) VALUES (md5(random()::text))
-        \watch 0.2
-        EOF
+      WORKLOAD_INTERVAL: ${WORKLOAD_INTERVAL:-0.2}
+    volumes:
+      - ./scripts/workload.sh:/workload.sh:ro
+      - ./runs:/runs
+    entrypoint: ["bash", "/workload.sh"]
 
 volumes:
   pgdata:
