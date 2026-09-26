@@ -1,0 +1,21 @@
+services:
+  pg:
+    build: .
+    environment:
+      POSTGRES_PASSWORD: postgres
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=pgbackrest --stanza=main archive-push %p
+      - -c
+      - archive_timeout=60
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - pgbackrest:/var/lib/pgbackrest   # sengaja volume terpisah = "offsite" versi lab
+volumes:
+  pgdata:
+  pgbackrest:
